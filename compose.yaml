@@ -4,6 +4,7 @@ include:
   - ./visualization.yaml
   - ./monitoring.yaml
   - ./observability.yaml
+  - ./alerting.yaml
 
 services:
   alloy:

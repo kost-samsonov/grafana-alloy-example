@@ -6,6 +6,14 @@ scrape_configs:
     static_configs:
       - targets: ['host.docker.internal:9464'] # Target your Node.js app metrics endpoint
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - 'alerts.yml'
+
 # Commented out, as Alloy config contains this job
   # # Scrape config for Windows WMI Exporter
   # - job_name: 'node_exporter'
