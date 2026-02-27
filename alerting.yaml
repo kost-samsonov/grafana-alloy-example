@@ -1,0 +1,24 @@
+services:
+  alertmanager:
+    container_name: alertmanager
+    image: prom/alertmanager:latest
+    restart: on-failure
+    volumes:
+      - ./config/alertmanager:/etc/alertmanager-config
+    command:
+      - '--config.file=/etc/alertmanager-config/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    ports:
+      - '9093:9093'
+    networks:
+      - default    # или укажите имя сети, если вы её определяли
+
+  mailhog:
+    container_name: mailhog
+    image: mailhog/mailhog:latest
+    restart: on-failure
+    ports:
+      - '1025:1025'   # SMTP
+      - '8025:8025'   # Web UI
+    networks:
+      - default

@@ -1,0 +1,110 @@
+// Сбор логов хоста
+local.file_match "host_logs" {
+  path_targets = [
+    {__path__ = "/var/log/*.log", job = "varlogs"},
+  ]
+}
+
+loki.source.file "host_logs" {
+  targets    = local.file_match.host_logs.targets
+  forward_to = [loki.process.add_host_labels.receiver]
+}
+
+// Обнаружение контейнеров для логов
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "^/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_log_path"]
+    target_label  = "log_path"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.process.add_host_labels.receiver]
+}
+
+// Добавление меток к логам
+loki.process "add_host_labels" {
+  forward_to = [otelcol.receiver.loki.default.receiver]
+  stage.static_labels {
+    values = {
+      host = "my-vm-hostname",   // замените на реальное имя хоста
+      source = "alloy-client",
+    }
+  }
+}
+
+// Конвертер Loki -> OTLP
+otelcol.receiver.loki "default" {
+  output {
+    logs = [otelcol.processor.batch.default.input]
+  }
+}
+
+// Сбор метрик хоста (скрапинг Node Exporter)
+prometheus.scrape "node_exporter" {
+  targets = [
+    {__address__ = "node_exporter:9100", job = "node"},
+  ]
+  forward_to = [otelcol.receiver.prometheus.default.receiver]
+}
+
+// Сбор метрик контейнеров через cAdvisor (встроенный в Alloy)
+prometheus.exporter.cadvisor "cadvisor" {}
+
+prometheus.scrape "cadvisor" {
+  targets    = prometheus.exporter.cadvisor.cadvisor.targets
+  forward_to = [otelcol.receiver.prometheus.default.receiver]
+}
+
+// Конвертер Prometheus -> OTLP
+otelcol.receiver.prometheus "default" {
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+  }
+}
+
+// Приём трейсов от приложений
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    traces = [otelcol.processor.batch.default.input]
+  }
+}
+
+// Общий батчинг
+otelcol.processor.batch "default" {
+  timeout = "5s"
+  send_batch_size = 1024
+  output {
+    metrics = [otelcol.exporter.otlp.gateway.input]
+    logs    = [otelcol.exporter.otlp.gateway.input]
+    traces  = [otelcol.exporter.otlp.gateway.input]
+  }
+}
+
+// Отправка в Alloy Gateway
+otelcol.exporter.otlp "gateway" {
+  client {
+    endpoint = "10.0.77.33:4317"   // ← замените на IP вашего сервера
+    tls {
+      insecure = true
+    }
+  }
+}
