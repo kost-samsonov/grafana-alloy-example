@@ -16,6 +16,7 @@ services:
     volumes:
       - ./config/alloy:/etc/alloy
     environment:
+      HOSTNAME_FROM_HOST: ${HOST_HOSTNAME}
       REMOTE_WRITE_HOST: mimir:9009
       LOKI_HOST: loki:3100
       TEMPO_HOST: tempo:4317

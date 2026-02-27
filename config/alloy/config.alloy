@@ -65,7 +65,11 @@ prometheus.scrape "alloy" {
 // prometheus.exporter.node_exporter "node_exporter" {}
 prometheus.scrape "node_exporter" {
   targets = [
-    {"__address__" = "node_exporter:9100", "job" = "node_exporter"},
+    {
+     "__address__" = "node_exporter:9100",
+     "job" = "node_exporter",
+     "host" =  sys.env("HOSTNAME_FROM_HOST"),
+    },
   ]
   forward_to = [prometheus.remote_write.mimir.receiver]
 }
