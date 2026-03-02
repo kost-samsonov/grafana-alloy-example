@@ -6,7 +6,7 @@ services:
     container_name: alloy-client
     restart: unless-stopped
     environment:
-      - HOSTNAME_FROM_HOST=${HOST_HOSTNAME}
+      - HOSTNAME_FROM_HOST=$(hostname -f)
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy
       - /var/log:/var/log:ro
