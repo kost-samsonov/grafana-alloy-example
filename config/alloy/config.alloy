@@ -36,7 +36,7 @@ logging {
 loki.relabel "alloy_logs" {
 	rule {
 		target_label = "instance"
-		replacement = constants.hostname
+		replacement = sys.env("HOSTNAME_FROM_HOST")
 	}
 
 	rule {
@@ -71,13 +71,43 @@ prometheus.scrape "node_exporter" {
      "host" =  sys.env("HOSTNAME_FROM_HOST"),
     },
   ]
-  forward_to = [prometheus.remote_write.mimir.receiver]
+
+
+  //forward_to = [prometheus.remote_write.mimir.receiver]
+  forward_to = [prometheus.relabel.set_instance.receiver]
+
 }
+
+
+prometheus.relabel "set_instance" {
+  forward_to = [prometheus.remote_write.mimir.receiver] // теперь дальше идёт сюда
+
+  // Правило: взять значение из метки "host" и записать его в метку "instance"
+  rule {
+    source_labels = ["host"]
+    target_label  = "instance"
+    action        = "replace"
+  }
+  
+  // Опционально: можно оставить и оригинальный instance (node_exporter:9100),
+  // создав другую метку, но обычно это не нужно.
+  // rule {
+  //   source_labels = ["__address__"]
+  //   target_label  = "scrape_address"
+  //   action        = "replace"
+  // }
+}
+
+
+
 
 // Collect profiles from the local running Alloy instance and forward to Pyroscope.
 pyroscope.scrape "default" {
 	targets = [
-		{"__address__" = "localhost:12345", "service_name" = "alloy"},
+		{
+                 "__address__" = "localhost:12345",
+                 "service_name" = "alloy",
+},
 	]
 	forward_to = [pyroscope.write.pyroscope.receiver]
 }
