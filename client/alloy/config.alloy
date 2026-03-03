@@ -61,8 +61,30 @@ prometheus.scrape "node_exporter" {
      "host" = sys.env("HOSTNAME_FROM_HOST"),
     },
   ]
-  forward_to = [otelcol.receiver.prometheus.default.receiver]
+  forward_to = [prometheus.relabel.set_instance.receiver]
+
 }
+
+// Добавляем компонент для перезаписи метки instance
+prometheus.relabel "set_instance" {
+  forward_to = [otelcol.receiver.prometheus.default.receiver] // теперь дальше идёт сюда
+
+  // Правило: взять значение из метки "host" и записать его в метку "instance"
+  rule {
+    source_labels = ["host"]
+    target_label  = "instance"
+    action        = "replace"
+  }
+  
+  // Опционально: можно оставить и оригинальный instance (node_exporter:9100),
+  // создав другую метку, но обычно это не нужно.
+  // rule {
+  //   source_labels = ["__address__"]
+  //   target_label  = "scrape_address"
+  //   action        = "replace"
+  // }
+}
+
 
 // Сбор метрик контейнеров через cAdvisor (встроенный в Alloy)
 prometheus.exporter.cadvisor "cadvisor" {}

@@ -6,7 +6,7 @@ services:
     container_name: alloy-client
     restart: unless-stopped
     environment:
-      - HOSTNAME_FROM_HOST=$(hostname -f)
+      - HOSTNAME_FROM_HOST=${HOST_HOSTNAME}
     volumes:
       - ./alloy/config.alloy:/etc/alloy/config.alloy
       - /var/log:/var/log:ro
@@ -14,9 +14,10 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
     ports:
+      - '12345:12345'
       - "4317:4317"   # для приёма трейсов по gRPC от локальных приложений
       - "4318:4318"   # для приёма трейсов по HTTP
-    command: run /etc/alloy/config.alloy
+    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
     # Если нужно ограничить потребление памяти, добавьте:
     # deploy:
     #   resources:
@@ -27,6 +28,8 @@ services:
     image: prom/node-exporter:latest
     container_name: node_exporter
     restart: unless-stopped
+    environment:
+      - HOSTNAME_FROM_HOST=${HOST_HOSTNAME}
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
