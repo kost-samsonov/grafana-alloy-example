@@ -35,7 +35,7 @@ logging {
 
 loki.relabel "alloy_logs" {
 	rule {
-		target_label = "instance"
+		target_label = "host"
 		replacement = sys.env("HOSTNAME_FROM_HOST")
 	}
 
