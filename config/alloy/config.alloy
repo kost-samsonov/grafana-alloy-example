@@ -26,6 +26,36 @@ otelcol.exporter.loki "loki" {
 }
 
 
+// Сбор метрик Docker через встроенный cAdvisor
+
+prometheus.exporter.cadvisor "docker" {
+  docker_host = "unix:///var/run/docker.sock"   // путь к сокету Docker
+  docker_only = true                             // только Docker, без дополнительных метрик
+}
+
+// Добавляем метки (например, host, job) к метрикам cadvisor
+discovery.relabel "cadvisor" {
+  targets = prometheus.exporter.cadvisor.docker.targets
+
+  rule {
+    target_label = "host"
+    replacement  = sys.env("HOSTNAME_FROM_HOST")   // используем ту же переменную, что и для node_exporter
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "integrations/cadvisor"
+  }
+}
+
+// Скрейпим метрики cadvisor
+prometheus.scrape "cadvisor" {
+  targets    = discovery.relabel.cadvisor.output
+  forward_to = [prometheus.remote_write.mimir.receiver]   // отправляем в Mimir
+  scrape_interval = "15s"
+}
+
+
 logging {
 	level = "debug"
 
