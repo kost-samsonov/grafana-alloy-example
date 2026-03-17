@@ -1,164 +1,163 @@
-// Сбор логов хоста
+// ==================== ЛОГИ ====================
+//------------------------- Логи хоста
 local.file_match "host_logs" {
   path_targets = [
     {__path__ = "/var/log/*.log", job = "varlogs"},
   ]
 }
 
-loki.source.file "host_logs" {
-  targets    = local.file_match.host_logs.targets
-  forward_to = [loki.process.add_host_labels.receiver]
+loki.process "host_logs" {
+  forward_to = [otelcol.receiver.loki.default.receiver]
+  stage.static_labels {
+    values = {
+      host = sys.env("HOSTNAME_FROM_HOST"),
+      job  = "host_varlogs",
+     
+    }
+  }
 }
 
-// Обнаружение контейнеров для логов
-discovery.docker "containers" {
-  host = "unix:///var/run/docker.sock"
+loki.source.file "host_logs" {
+  targets    = local.file_match.host_logs.targets
+  forward_to = [loki.process.host_logs.receiver]
+}
+
+  //======================= Логи контейнеров
+  discovery.docker "containers" {
+    host = "unix:///var/run/docker.sock"
 }
 
 discovery.relabel "containers" {
   targets = discovery.docker.containers.targets
+
+  // Убираем IPv6
+  rule {
+    source_labels = ["__meta_docker_port_public_ip"]
+    regex         = "::"
+    action        = "drop"
+  }
+
+  // Извлекаем чистое имя контейнера
   rule {
     source_labels = ["__meta_docker_container_name"]
     regex         = "^/(.*)"
-    target_label  = "container"
+    target_label  = "container_name"
+    replacement   = "$1"
   }
+
+  // ДОБАВЛЯЕМ метку image
   rule {
-    source_labels = ["__meta_docker_container_log_path"]
-    target_label  = "log_path"
+    source_labels = ["__meta_docker_container_image"]
+    target_label  = "container_image"
+  }
+  //
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label = "container_service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label = "container_project"
+  }
+
+
+}
+
+loki.process "container_logs" {
+  forward_to = [otelcol.receiver.loki.default.receiver]
+  stage.static_labels {
+    values = {
+      host = sys.env("HOSTNAME_FROM_HOST"),
+      job  = "docker_logs",
+    }
   }
 }
 
 loki.source.docker "containers" {
   host       = "unix:///var/run/docker.sock"
   targets    = discovery.relabel.containers.output
-  forward_to = [loki.process.add_host_labels.receiver]
+  forward_to = [loki.process.container_logs.receiver]
 }
 
-// Добавление меток к логам
-loki.process "add_host_labels" {
-  forward_to = [otelcol.receiver.loki.default.receiver]
-  stage.static_labels {
-    values = {
-      "host" =  sys.env("HOSTNAME_FROM_HOST"),
-      "source" = "alloy-client",
-    }
-  }
-}
 
-// Конвертер Loki -> OTLP
-otelcol.receiver.loki "default" {
-  output {
-    logs = [otelcol.processor.batch.default.input]
-  }
-}
 
-// Сбор метрик хоста (скрапинг Node Exporter)
+// ==================== МЕТРИКИ ====================
+//=================== Node Exporter
 prometheus.scrape "node_exporter" {
-  targets = [
-    {
-     "__address__" = "node_exporter:9100",
-     "job" = "node_exporter",
-     "host" = sys.env("HOSTNAME_FROM_HOST"),
-    },
-  ]
-  forward_to = [prometheus.relabel.set_instance.receiver]
-
-}
-
-// Добавляем компонент для перезаписи метки instance
-prometheus.relabel "set_instance" {
-  forward_to = [otelcol.receiver.prometheus.default.receiver] // теперь дальше идёт сюда
-
-  // Правило: взять значение из метки "host" и записать его в метку "instance"
-  rule {
-    source_labels = ["host"]
-    target_label  = "instance"
-    action        = "replace"
-  }
-  
-  // Опционально: можно оставить и оригинальный instance (node_exporter:9100),
-  // создав другую метку, но обычно это не нужно.
-  // rule {
-  //   source_labels = ["__address__"]
-  //   target_label  = "scrape_address"
-  //   action        = "replace"
-  // }
+  targets = [{
+    __address__ = "node_exporter:9100",
+    job         = "node",
+    host        = sys.env("HOSTNAME_FROM_HOST"),
+  }]
+  forward_to = [otelcol.receiver.prometheus.default.receiver]
 }
 
 
-
-
-prometheus.exporter.cadvisor "cadvisor" {
+//=================== cAdvisor
+prometheus.exporter.cadvisor "docker" {
   docker_host = "unix:///var/run/docker.sock"
   docker_only = true
   store_container_labels = true
 }
 
-discovery.relabel "cadvisor_targets" {
-  targets = prometheus.exporter.cadvisor.cadvisor.targets
+prometheus.scrape "cadvisor" {
+  targets    = prometheus.exporter.cadvisor.docker.targets
+  forward_to = [prometheus.relabel.cadvisor_metrics.receiver]
+  scrape_interval = "15s"
+
+
+}
+
+prometheus.relabel "cadvisor_metrics" {
+  forward_to = [otelcol.receiver.prometheus.default.receiver]
+
   rule {
     target_label = "host"
     replacement  = sys.env("HOSTNAME_FROM_HOST")
   }
+
+  rule {
+    source_labels = ["container_label_com_docker_compose_service"]
+    target_label = "container_service"
+  }
+
+  rule {
+    source_labels = ["container_label_com_docker_compose_project"]
+    target_label = "container_project"
+  }
+
   rule {
     target_label = "job"
-    replacement  = "integrations/cadvisor"
+    replacement  = "cadvisor"
   }
-  rule {
-    target_label = "instance"          // добавляем instance сразу
-    replacement  = sys.env("HOSTNAME_FROM_HOST")
-  }
+
 }
 
+// ==================== КОНВЕРТАЦИЯ И ОТПРАВКА ====================
 
-
-
-prometheus.scrape "cadvisor" {
-  targets    = discovery.relabel.cadvisor_targets.output
-  forward_to = [otelcol.receiver.prometheus.default.receiver]  // прямо в конвертер
-  scrape_interval = "15s"
-}
-
-
-
-
-// ////////////////// Конвертер Prometheus -> OTLP
 otelcol.receiver.prometheus "default" {
-  output {
+  output { 
     metrics = [otelcol.processor.batch.default.input]
   }
 }
 
-// Приём трейсов от приложений
-otelcol.receiver.otlp "default" {
-  grpc {
-    endpoint = "0.0.0.0:4317"
-  }
-  http {
-    endpoint = "0.0.0.0:4318"
-  }
-  output {
-    traces = [otelcol.processor.batch.default.input]
-  }
+otelcol.receiver.loki "default" {
+  output { logs = [otelcol.processor.batch.default.input] }
 }
 
-// Общий батчинг
 otelcol.processor.batch "default" {
   timeout = "5s"
   send_batch_size = 1024
   output {
     metrics = [otelcol.exporter.otlp.gateway.input]
     logs    = [otelcol.exporter.otlp.gateway.input]
-    traces  = [otelcol.exporter.otlp.gateway.input]
   }
 }
 
-// Отправка в Alloy Gateway
 otelcol.exporter.otlp "gateway" {
   client {
-    endpoint = "10.0.77.33:4317"   // ← замените на IP вашего сервера
-    tls {
-      insecure = true
-    }
+    endpoint = "10.0.77.33:4317"
+    tls { insecure = true }
   }
 }

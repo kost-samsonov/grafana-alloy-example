@@ -1,6 +1,6 @@
 
+
 HOST_HOSTNAME=$(hostname -f)
-export HOST_HOSTNAME
-echo $HOST_HOSTNAME
+echo "HOST_HOSTNAME=$HOST_HOSTNAME" > .env
 
 docker compose up -d
