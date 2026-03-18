@@ -1,8 +1,11 @@
 // ==================== ЛОГИ ====================
-//------------------------- Логи хоста
+//=================== Логи хоста
 local.file_match "host_logs" {
   path_targets = [
-    {__path__ = "/var/log/*.log", job = "varlogs"},
+    {
+      __path__ = "/var/log/*.log",
+      job = "host_varlogs",
+    },
   ]
 }
 
@@ -22,7 +25,9 @@ loki.source.file "host_logs" {
   forward_to = [loki.process.host_logs.receiver]
 }
 
-  //======================= Логи контейнеров
+
+//================= Логи контейнеров
+
   discovery.docker "containers" {
     host = "unix:///var/run/docker.sock"
 }
@@ -45,17 +50,17 @@ discovery.relabel "containers" {
     replacement   = "$1"
   }
 
-  // ДОБАВЛЯЕМ метку image
+  // ДОБАВЛЯЕМ метку "container_image"
   rule {
     source_labels = ["__meta_docker_container_image"]
     target_label  = "container_image"
   }
-  //
+ // ДОБАВЛЯЕМ метку "container_service"
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
     target_label = "container_service"
   }
-
+ // ДОБАВЛЯЕМ метку "container_project"
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
     target_label = "container_project"
@@ -87,7 +92,7 @@ loki.source.docker "containers" {
 prometheus.scrape "node_exporter" {
   targets = [{
     __address__ = "node_exporter:9100",
-    job         = "node",
+    job         = "host_node_exporter",
     host        = sys.env("HOSTNAME_FROM_HOST"),
   }]
   forward_to = [otelcol.receiver.prometheus.default.receiver]
@@ -105,8 +110,6 @@ prometheus.scrape "cadvisor" {
   targets    = prometheus.exporter.cadvisor.docker.targets
   forward_to = [prometheus.relabel.cadvisor_metrics.receiver]
   scrape_interval = "15s"
-
-
 }
 
 prometheus.relabel "cadvisor_metrics" {
@@ -129,7 +132,7 @@ prometheus.relabel "cadvisor_metrics" {
 
   rule {
     target_label = "job"
-    replacement  = "cadvisor"
+    replacement  = "docker_cadvisor"
   }
 
 }
