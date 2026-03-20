@@ -97,6 +97,14 @@ discovery.docker "node_exporter" {
 discovery.relabel "node_exporter" {
   targets = discovery.docker.node_exporter.targets
 
+  // Убираем IPv6
+  rule {
+    source_labels = ["__meta_docker_port_public_ip"]
+    regex         = "::"
+    action        = "drop"
+  }
+
+
   // Оставляем только контейнер с именем node_exporter
   rule {
     source_labels = ["__meta_docker_container_name"]
@@ -106,7 +114,7 @@ discovery.relabel "node_exporter" {
 
   // Устанавливаем адрес: используем имя контейнера и порт (если порт проброшен)
   rule {
-    source_labels = ["__meta_docker_container_name", "__meta_docker_container_port"]
+    source_labels = ["__meta_docker_container_name", "__meta_docker_port_public"]
     separator     = ":"
     target_label  = "__address__"
     regex         = "/(.+):(.*)"
