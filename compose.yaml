@@ -15,6 +15,15 @@ services:
     restart: on-failure
     volumes:
       - ./config/alloy:/etc/alloy
+
+      - /:/rootfs:ro
+      - /sys:/sys:ro
+      - /dev/disk/:/dev/disk:ro
+      - /proc:/rootproc:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /var/run:/var/run:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       HOSTNAME_FROM_HOST: ${HOST_HOSTNAME}
       REMOTE_WRITE_HOST: mimir:9009

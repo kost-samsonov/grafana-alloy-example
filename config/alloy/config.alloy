@@ -1,4 +1,4 @@
-
+// ==================== ПРИЁМ ДАННЫХ ОТ КЛИЕНТА ====================
 otelcol.receiver.otlp "default" {
   grpc { endpoint = "0.0.0.0:4317" }
   http { endpoint = "0.0.0.0:4318" }
@@ -9,7 +9,23 @@ otelcol.receiver.otlp "default" {
   }
 }
 
+// ==================== ЛОКАЛЬНЫЕ РЕСИВЕРЫ (ДЛЯ УНИФИКАЦИИ) ====================
+otelcol.receiver.prometheus "default" {
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.receiver.loki "default" {
+  output {
+    logs = [otelcol.processor.batch.default.input]
+  }
+}
+
+// ==================== БАТЧИРОВАНИЕ ====================
 otelcol.processor.batch "default" {
+  timeout          = "5s"
+  send_batch_size  = 1024
   output {
     metrics = [otelcol.exporter.prometheus.mimir.input]
     logs    = [otelcol.exporter.loki.loki.input]
@@ -17,6 +33,7 @@ otelcol.processor.batch "default" {
   }
 }
 
+// ==================== ЭКСПОРТЁРЫ В ХРАНИЛИЩА ====================
 otelcol.exporter.prometheus "mimir" {
   forward_to = [prometheus.remote_write.mimir.receiver]
 }
@@ -25,147 +42,192 @@ otelcol.exporter.loki "loki" {
   forward_to = [loki.write.loki.receiver]
 }
 
-
-// Сбор метрик Docker через встроенный cAdvisor
-
-prometheus.exporter.cadvisor "docker" {
-  docker_host = "unix:///var/run/docker.sock"   // путь к сокету Docker
-  docker_only = true                             // только Docker, без дополнительных метрик
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls { insecure = true }
+  }
 }
 
-// Добавляем метки (например, host, job) к метрикам cadvisor
-discovery.relabel "cadvisor" {
-  targets = prometheus.exporter.cadvisor.docker.targets
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = "http://mimir:9009/api/v1/push"
+  }
+}
+
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+pyroscope.write "pyroscope" {
+  endpoint {
+    url = "http://pyroscope:4040"
+  }
+}
+
+// ==================== СБОР ЛОГОВ ХОСТА ====================
+local.file_match "host_logs" {
+  path_targets = [
+    {
+    __path__ = "/var/log/*.log",
+     job = "host_varlogs",
+    },
+  ]
+}
+
+loki.process "host_logs" {
+  forward_to = [otelcol.receiver.loki.default.receiver]
+  stage.static_labels {
+    values = {
+      host = sys.env("HOSTNAME_FROM_HOST"),
+      job  = "host_varlogs",
+    }
+  }
+}
+
+loki.source.file "host_logs" {
+  targets    = local.file_match.host_logs.targets
+  forward_to = [loki.process.host_logs.receiver]
+}
+
+// ==================== СБОР ЛОГОВ КОНТЕЙНЕРОВ ====================
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_port_public_ip"]
+    regex         = "::"
+    action        = "drop"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "^/(.*)"
+    target_label  = "container_name"
+    replacement   = "$1"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_image"]
+    target_label  = "container_image"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "container_service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "container_project"
+  }
+}
+
+loki.process "container_logs" {
+  forward_to = [otelcol.receiver.loki.default.receiver]
+  stage.static_labels {
+    values = {
+      host = sys.env("HOSTNAME_FROM_HOST"),
+      job  = "docker_logs",
+    }
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.process.container_logs.receiver]
+}
+
+// ==================== СБОР МЕТРИК ====================
+// Node Exporter
+prometheus.scrape "node_exporter" {
+  targets = [{
+    __address__ = "node_exporter:9100",
+    job         = "host_node_exporter",
+    host        = sys.env("HOSTNAME_FROM_HOST"),
+  }]
+  forward_to = [otelcol.receiver.prometheus.default.receiver]
+}
+
+// cAdvisor
+prometheus.exporter.cadvisor "docker" {
+  docker_host = "unix:///var/run/docker.sock"
+  docker_only = true
+  store_container_labels = true
+}
+
+prometheus.scrape "cadvisor" {
+  targets         = prometheus.exporter.cadvisor.docker.targets
+  forward_to      = [prometheus.relabel.cadvisor_metrics.receiver]
+  scrape_interval = "15s"
+}
+
+prometheus.relabel "cadvisor_metrics" {
+  forward_to = [otelcol.receiver.prometheus.default.receiver]
 
   rule {
     target_label = "host"
-    replacement  = sys.env("HOSTNAME_FROM_HOST")   // используем ту же переменную, что и для node_exporter
+    replacement  = sys.env("HOSTNAME_FROM_HOST")
+  }
+
+  rule {
+    source_labels = ["container_label_com_docker_compose_service"]
+    target_label  = "container_service"
+  }
+
+  rule {
+    source_labels = ["container_label_com_docker_compose_project"]
+    target_label  = "container_project"
   }
 
   rule {
     target_label = "job"
-    replacement  = "integrations/cadvisor"
+    replacement  = "docker_cadvisor"
   }
 }
 
-// Скрейпим метрики cadvisor
-prometheus.scrape "cadvisor" {
-  targets    = discovery.relabel.cadvisor.output
-  forward_to = [prometheus.remote_write.mimir.receiver]   // отправляем в Mimir
-  scrape_interval = "15s"
+// Self metrics (метрики самого Alloy)
+prometheus.exporter.self "alloy" {}
+prometheus.scrape "alloy" {
+  targets    = prometheus.exporter.self.alloy.targets
+  forward_to = [otelcol.receiver.prometheus.default.receiver]
 }
 
-
+// ==================== ВНУТРЕННИЕ ЛОГИ И ТРЕЙСЫ ALLOY ====================
 logging {
-	level = "debug"
-
-	// Forward internal logs to the local Loki instance.
-	write_to = [loki.relabel.alloy_logs.receiver]
+  level = "debug"
+  write_to = [loki.relabel.alloy_logs.receiver]
 }
 
 loki.relabel "alloy_logs" {
-	rule {
-		target_label = "host"
-		replacement = sys.env("HOSTNAME_FROM_HOST")
-	}
-
-	rule {
-		target_label = "job"
-		replacement = "integrations/self"
-	}
-
-	forward_to = [loki.write.loki.receiver]
+  rule {
+    target_label = "host"
+    replacement  = sys.env("HOSTNAME_FROM_HOST")
+  }
+  rule {
+    target_label = "job"
+    replacement  = "integrations/self"
+  }
+  forward_to = [loki.write.loki.receiver]  // отправляем напрямую в Loki, минуя batch (как в клиенте нет аналога)
 }
 
 tracing {
-	// Write all spans. Don't do this in production!
-	sampling_fraction = 1.0
-
-	// Forward internal spans to the local Tempo instance.
-	write_to = [otelcol.exporter.otlp.tempo.input]
+  sampling_fraction = 1.0
+  write_to = [otelcol.exporter.otlp.tempo.input]  // напрямую в Tempo
 }
 
-// Collect metrics from the local running Alloy instance and forward to Prometheus.
-prometheus.exporter.self "alloy" {}
-prometheus.scrape "alloy" {
-	targets    = prometheus.exporter.self.alloy.targets
-	forward_to = [prometheus.remote_write.mimir.receiver]
-}
-
-// prometheus.exporter.node_exporter "node_exporter" {}
-prometheus.scrape "node_exporter" {
-  targets = [
-    {
-     "__address__" = "node_exporter:9100",
-     "job" = "node_exporter",
-     "host" =  sys.env("HOSTNAME_FROM_HOST"),
-    },
-  ]
-
-
-  //forward_to = [prometheus.remote_write.mimir.receiver]
-  forward_to = [prometheus.relabel.set_instance.receiver]
-
-}
-
-
-prometheus.relabel "set_instance" {
-  forward_to = [prometheus.remote_write.mimir.receiver] // теперь дальше идёт сюда
-
-  // Правило: взять значение из метки "host" и записать его в метку "instance"
-  rule {
-    source_labels = ["host"]
-    target_label  = "instance"
-    action        = "replace"
-  }
-  
-  // Опционально: можно оставить и оригинальный instance (node_exporter:9100),
-  // создав другую метку, но обычно это не нужно.
-  // rule {
-  //   source_labels = ["__address__"]
-  //   target_label  = "scrape_address"
-  //   action        = "replace"
-  // }
-}
-
-
-
-
-// Collect profiles from the local running Alloy instance and forward to Pyroscope.
+// ==================== ПРОФИЛИРОВАНИЕ ====================
 pyroscope.scrape "default" {
-	targets = [
-		{
-                 "__address__" = "localhost:12345",
-                 "service_name" = "alloy",
-},
-	]
-	forward_to = [pyroscope.write.pyroscope.receiver]
-}
-
-prometheus.remote_write "mimir" {
-	endpoint {
-		url = "http://mimir:9009/api/v1/push"
-	}
-}
-
-loki.write "loki" {
-	endpoint {
-		url = "http://loki:3100/loki/api/v1/push"
-	}
-}
-
-otelcol.exporter.otlp "tempo" {
-	client {
-		endpoint = "tempo:4317"
-
-		tls {
-			insecure = true
-		}
-	}
-}
-
-pyroscope.write "pyroscope" {
-	endpoint {
-		url = "http://pyroscope:4040"
-	}
+  targets = [{
+    __address__   = "localhost:12345",
+    service_name  = "alloy",
+  }]
+  forward_to = [pyroscope.write.pyroscope.receiver]
 }

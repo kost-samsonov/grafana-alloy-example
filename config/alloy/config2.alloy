@@ -1,0 +1,171 @@
+
+otelcol.receiver.otlp "default" {
+  grpc { endpoint = "0.0.0.0:4317" }
+  http { endpoint = "0.0.0.0:4318" }
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.processor.batch.default.input]
+    traces  = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  output {
+    metrics = [otelcol.exporter.prometheus.mimir.input]
+    logs    = [otelcol.exporter.loki.loki.input]
+    traces  = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.prometheus "mimir" {
+  forward_to = [prometheus.remote_write.mimir.receiver]
+}
+
+otelcol.exporter.loki "loki" {
+  forward_to = [loki.write.loki.receiver]
+}
+
+
+// Сбор метрик Docker через встроенный cAdvisor
+
+prometheus.exporter.cadvisor "docker" {
+  docker_host = "unix:///var/run/docker.sock"   // путь к сокету Docker
+  docker_only = true                             // только Docker, без дополнительных метрик
+}
+
+// Добавляем метки (например, host, job) к метрикам cadvisor
+discovery.relabel "cadvisor" {
+  targets = prometheus.exporter.cadvisor.docker.targets
+
+  rule {
+    target_label = "host"
+    replacement  = sys.env("HOSTNAME_FROM_HOST")   // используем ту же переменную, что и для node_exporter
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "integrations/cadvisor"
+  }
+}
+
+// Скрейпим метрики cadvisor
+prometheus.scrape "cadvisor" {
+  targets    = discovery.relabel.cadvisor.output
+  forward_to = [prometheus.remote_write.mimir.receiver]   // отправляем в Mimir
+  scrape_interval = "15s"
+}
+
+
+logging {
+	level = "debug"
+
+	// Forward internal logs to the local Loki instance.
+	write_to = [loki.relabel.alloy_logs.receiver]
+}
+
+loki.relabel "alloy_logs" {
+	rule {
+		target_label = "host"
+		replacement = sys.env("HOSTNAME_FROM_HOST")
+	}
+
+	rule {
+		target_label = "job"
+		replacement = "integrations/self"
+	}
+
+	forward_to = [loki.write.loki.receiver]
+}
+
+tracing {
+	// Write all spans. Don't do this in production!
+	sampling_fraction = 1.0
+
+	// Forward internal spans to the local Tempo instance.
+	write_to = [otelcol.exporter.otlp.tempo.input]
+}
+
+// Collect metrics from the local running Alloy instance and forward to Prometheus.
+prometheus.exporter.self "alloy" {}
+prometheus.scrape "alloy" {
+	targets    = prometheus.exporter.self.alloy.targets
+	forward_to = [prometheus.remote_write.mimir.receiver]
+}
+
+// prometheus.exporter.node_exporter "node_exporter" {}
+prometheus.scrape "node_exporter" {
+  targets = [
+    {
+     "__address__" = "node_exporter:9100",
+     "job" = "node_exporter",
+     "host" =  sys.env("HOSTNAME_FROM_HOST"),
+    },
+  ]
+
+
+  //forward_to = [prometheus.remote_write.mimir.receiver]
+  forward_to = [prometheus.relabel.set_instance.receiver]
+
+}
+
+
+prometheus.relabel "set_instance" {
+  forward_to = [prometheus.remote_write.mimir.receiver] // теперь дальше идёт сюда
+
+  // Правило: взять значение из метки "host" и записать его в метку "instance"
+  rule {
+    source_labels = ["host"]
+    target_label  = "instance"
+    action        = "replace"
+  }
+  
+  // Опционально: можно оставить и оригинальный instance (node_exporter:9100),
+  // создав другую метку, но обычно это не нужно.
+  // rule {
+  //   source_labels = ["__address__"]
+  //   target_label  = "scrape_address"
+  //   action        = "replace"
+  // }
+}
+
+
+
+
+// Collect profiles from the local running Alloy instance and forward to Pyroscope.
+pyroscope.scrape "default" {
+	targets = [
+		{
+                 "__address__" = "localhost:12345",
+                 "service_name" = "alloy",
+},
+	]
+	forward_to = [pyroscope.write.pyroscope.receiver]
+}
+
+prometheus.remote_write "mimir" {
+	endpoint {
+		url = "http://mimir:9009/api/v1/push"
+	}
+}
+
+loki.write "loki" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+}
+
+otelcol.exporter.otlp "tempo" {
+	client {
+		endpoint = "tempo:4317"
+
+		tls {
+			insecure = true
+		}
+	}
+}
+
+pyroscope.write "pyroscope" {
+	endpoint {
+		url = "http://pyroscope:4040"
+	}
+}
