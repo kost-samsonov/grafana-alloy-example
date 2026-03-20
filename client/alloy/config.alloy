@@ -98,7 +98,6 @@ discovery.relabel "node_exporter" {
   targets = discovery.docker.node_exporter.targets
 
 
-
   // Оставляем только контейнер с именем node_exporter
   rule {
     source_labels = ["__meta_docker_container_name"]
@@ -113,8 +112,7 @@ discovery.relabel "node_exporter" {
     action        = "drop"
   }
 
-
-  // Устанавливаем адрес: используем имя контейнера и порт (если порт проброшен)
+// Устанавливаем адрес: используем имя контейнера и порт (если порт проброшен)
   rule {
     source_labels = ["__meta_docker_container_name", "__meta_docker_port_private"]
     separator     = ":"
@@ -125,28 +123,19 @@ discovery.relabel "node_exporter" {
 
   rule {
     source_labels = ["__meta_docker_container_id"]
-    target_label  = "instance"
-    regex         = "([a-f0-9]{12})"
+    target_label  = "container_id"
     replacement   = "$1"
   }
 
-
-
-  // Добавляем job и host, если нужно
+  // Добавляем job и host
   rule {
     target_label = "job"
     replacement  = "host_node_exporter"
   }
+
   rule {
     target_label = "host"
     replacement  = sys.env("HOSTNAME_FROM_HOST")
-  }
-
-  rule {
-    source_labels = ["__meta_docker_container_id"]
-    target_label  = "container_id"
-    regex         = "([a-f0-9]{12})"
-    replacement   = "$1"
   }
 
 }
@@ -155,10 +144,11 @@ discovery.relabel "node_exporter" {
 prometheus.relabel "fix_instance" {
   forward_to = [otelcol.receiver.prometheus.default.receiver]  // конечный получатель
 
-  rule {
+ rule {
     source_labels = ["container_id"]
     target_label  = "instance"
-    action        = "replace"
+    regex         = "([a-f0-9]{12})"
+    replacement   = "$1"
   }
 
 }
