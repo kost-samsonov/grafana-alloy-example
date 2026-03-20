@@ -89,7 +89,7 @@
             "properties": [
               {
                 "id": "unit",
-                "value": "d"
+                "value": "dtdhms"
               },
               {
                 "id": "decimals",
@@ -98,7 +98,7 @@
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "gauge"
+                  "type": "color-text"
                 }
               },
               {
@@ -107,10 +107,6 @@
                   "fixedColor": "dark-green",
                   "mode": "fixed"
                 }
-              },
-              {
-                "id": "unit",
-                "value": "percent"
               },
               {
                 "id": "custom.width",
@@ -258,7 +254,7 @@
         "sortBy": [
           {
             "desc": false,
-            "displayName": "Mem usage"
+            "displayName": "Running"
           }
         ]
       },
