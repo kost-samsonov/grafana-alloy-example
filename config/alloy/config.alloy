@@ -151,6 +151,7 @@ loki.source.docker "containers" {
 
 discovery.docker "node_exporter" {
   host = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
 }
 
 // Фильтруем и перезаписываем лейблы
@@ -174,6 +175,21 @@ discovery.relabel "node_exporter" {
   }
 
 
+ rule {
+    source_labels = ["__meta_docker_container_image"]
+    target_label  = "container_image"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "container_service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "container_project"
+  }
+
   // Устанавливаем адрес: используем имя контейнера и порт (если порт проброшен)
   rule {
     source_labels = ["__meta_docker_container_name", "__meta_docker_port_private"]
@@ -183,15 +199,13 @@ discovery.relabel "node_exporter" {
     replacement   = "$1:$2"
   }
 
-  rule {
-    source_labels = ["__meta_docker_container_id"]
-    target_label  = "instance"
-    regex         = "([a-f0-9]{12})"
-    replacement   = "$1"
-  }
+//  rule {
+//    source_labels = ["__meta_docker_container_id"]
+//    target_label  = "container_id"
+//    replacement   = "$1"
+//  }
 
 
-  // Добавляем job и host, если нужно
   rule {
     target_label = "job"
     replacement  = "host_node_exporter"
@@ -201,36 +215,19 @@ discovery.relabel "node_exporter" {
     replacement  = sys.env("HOSTNAME_FROM_HOST")
   }
 
-  rule {
-    source_labels = ["__meta_docker_container_id"]
-    target_label  = "container_id"
-    regex         = "([a-f0-9]{12})"
-    replacement   = "$1"
-  }
-
-}
-
-
-prometheus.relabel "fix_instance" {
-  forward_to = [otelcol.receiver.prometheus.default.receiver]  // конечный получатель
-
-  rule {
-    source_labels = ["container_id"]
-    target_label  = "instance"
-    action        = "replace"
-  }
-
 }
 
 
 prometheus.scrape "node_exporter" {
   targets    = discovery.relabel.node_exporter.output
-  forward_to = [prometheus.relabel.fix_instance.receiver]
+  forward_to = [otelcol.receiver.prometheus.default.receiver]
+  scrape_interval = "15s"
 }
 
 
 
-// cAdvisor
+// ======================= cAdvisor ==================
+
 prometheus.exporter.cadvisor "docker" {
   docker_host = "unix:///var/run/docker.sock"
   docker_only = true
@@ -251,6 +248,18 @@ prometheus.relabel "cadvisor_metrics" {
     replacement  = sys.env("HOSTNAME_FROM_HOST")
   }
 
+ rule {
+      source_labels = ["__meta_docker_container_name"]
+      regex         = "/(.*)"
+      target_label  = "container_name"
+    }
+
+  // ДОБАВЛЯЕМ метку "container_image"
+  rule {
+    source_labels = ["__meta_docker_container_image"]
+    target_label  = "container_image"
+  }
+
   rule {
     source_labels = ["container_label_com_docker_compose_service"]
     target_label  = "container_service"
@@ -269,6 +278,7 @@ prometheus.relabel "cadvisor_metrics" {
 
 // Self metrics (метрики самого Alloy)
 prometheus.exporter.self "alloy" {}
+
 prometheus.scrape "alloy" {
   targets    = prometheus.exporter.self.alloy.targets
   forward_to = [otelcol.receiver.prometheus.default.receiver]
