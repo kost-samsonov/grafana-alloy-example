@@ -148,7 +148,7 @@ loki.source.docker "containers" {
 // ==================== СБОР МЕТРИК ====================
 // Node Exporter
 
-// Обнаруживаем все контейнеры на Docker-хосте
+
 discovery.docker "node_exporter" {
   host = "unix:///var/run/docker.sock"
 }
@@ -157,6 +157,8 @@ discovery.docker "node_exporter" {
 discovery.relabel "node_exporter" {
   targets = discovery.docker.node_exporter.targets
 
+
+
   // Оставляем только контейнер с именем node_exporter
   rule {
     source_labels = ["__meta_docker_container_name"]
@@ -164,22 +166,30 @@ discovery.relabel "node_exporter" {
     action        = "keep"
   }
 
+  // Убираем IPv6
+  rule {
+    source_labels = ["__meta_docker_port_public_ip"]
+    regex         = "::"
+    action        = "drop"
+  }
+
+
   // Устанавливаем адрес: используем имя контейнера и порт (если порт проброшен)
   rule {
-    source_labels = ["__meta_docker_container_name", "__meta_docker_container_port"]
+    source_labels = ["__meta_docker_container_name", "__meta_docker_port_private"]
     separator     = ":"
     target_label  = "__address__"
     regex         = "/(.+):(.*)"
     replacement   = "$1:$2"
   }
 
-  // Устанавливаем instance = короткий ID контейнера
   rule {
     source_labels = ["__meta_docker_container_id"]
     target_label  = "instance"
     regex         = "([a-f0-9]{12})"
     replacement   = "$1"
   }
+
 
   // Добавляем job и host, если нужно
   rule {
@@ -190,13 +200,35 @@ discovery.relabel "node_exporter" {
     target_label = "host"
     replacement  = sys.env("HOSTNAME_FROM_HOST")
   }
+
+  rule {
+    source_labels = ["__meta_docker_container_id"]
+    target_label  = "container_id"
+    regex         = "([a-f0-9]{12})"
+    replacement   = "$1"
+  }
+
+}
+
+
+prometheus.relabel "fix_instance" {
+  forward_to = [otelcol.receiver.prometheus.default.receiver]  // конечный получатель
+
+  rule {
+    source_labels = ["container_id"]
+    target_label  = "instance"
+    action        = "replace"
+  }
+
 }
 
 
 prometheus.scrape "node_exporter" {
   targets    = discovery.relabel.node_exporter.output
-  forward_to = [otelcol.receiver.prometheus.default.receiver]
+  forward_to = [prometheus.relabel.fix_instance.receiver]
 }
+
+
 
 // cAdvisor
 prometheus.exporter.cadvisor "docker" {
