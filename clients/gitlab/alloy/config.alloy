@@ -1,0 +1,266 @@
+
+livedebugging {
+  enabled = true
+}
+
+
+// ==================== ЛОГИ ====================
+
+
+
+//=================== Логи хоста
+local.file_match "host_logs" {
+  path_targets = [
+    {
+      __path__ = "/var/log/*.log",
+      job = "host_varlogs",
+    },
+  ]
+}
+
+loki.process "host_logs" {
+  forward_to = [otelcol.receiver.loki.default.receiver]
+  stage.static_labels {
+    values = {
+      host = sys.env("HOSTNAME_FROM_HOST"),
+      job  = "host_varlogs",
+     
+    }
+  }
+}
+
+loki.source.file "host_logs" {
+  targets    = local.file_match.host_logs.targets
+  forward_to = [loki.process.host_logs.receiver]
+}
+
+
+//================= Логи контейнеров
+
+  discovery.docker "containers" {
+    host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  // Убираем IPv6
+  rule {
+    source_labels = ["__meta_docker_port_public_ip"]
+    regex         = "::"
+    action        = "drop"
+  }
+
+  // Извлекаем чистое имя контейнера
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "^/(.*)"
+    target_label  = "container_name"
+    replacement   = "$1"
+  }
+
+  // ДОБАВЛЯЕМ метку "container_image"
+  rule {
+    source_labels = ["__meta_docker_container_image"]
+    target_label  = "container_image"
+  }
+ // ДОБАВЛЯЕМ метку "container_service"
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label = "container_service"
+  }
+ // ДОБАВЛЯЕМ метку "container_project"
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label = "container_project"
+  }
+
+}
+
+loki.process "container_logs" {
+  forward_to = [otelcol.receiver.loki.default.receiver]
+  stage.static_labels {
+    values = {
+      host = sys.env("HOSTNAME_FROM_HOST"),
+      job  = "docker_logs",
+    }
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.process.container_logs.receiver]
+}
+
+
+
+// ==================== МЕТРИКИ ====================
+//=================== Node Exporter
+
+discovery.docker "node_exporter" {
+  host = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+
+// Фильтруем и перезаписываем лейблы
+discovery.relabel "node_exporter" {
+  targets = discovery.docker.node_exporter.targets
+
+
+  // Оставляем только контейнер с именем node_exporter
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/node_exporter"
+    action        = "keep"
+  }
+
+  // Убираем IPv6
+  rule {
+    source_labels = ["__meta_docker_port_public_ip"]
+    regex         = "::"
+    action        = "drop"
+  }
+
+// Устанавливаем адрес: используем имя контейнера и порт (если порт проброшен)
+
+  rule {
+    source_labels = ["__meta_docker_container_name", "__meta_docker_port_private"]
+    separator     = ":"
+    target_label  = "__address__"
+    regex         = "/(.+):(.*)"
+    replacement   = "$1:$2"
+  }
+
+//  rule {
+//    source_labels = ["__meta_docker_container_id"]
+//    target_label  = "container_id"
+//    replacement   = "$1"
+//  }
+
+  rule {
+      source_labels = ["__meta_docker_container_name"]
+      regex         = "/(.*)"
+      target_label  = "container_name"
+    }
+
+  // ДОБАВЛЯЕМ метку "container_image"
+  rule {
+    source_labels = ["__meta_docker_container_image"]
+    target_label  = "container_image"
+  }
+
+ // ДОБАВЛЯЕМ метку "container_service"
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label = "container_service"
+  }
+ // ДОБАВЛЯЕМ метку "container_project"
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label = "container_project"
+  }
+
+
+  // Добавляем job и host
+  rule {
+    target_label = "job"
+    replacement  = "host_node_exporter"
+  }
+
+  rule {
+    target_label = "host"
+    replacement  = sys.env("HOSTNAME_FROM_HOST")
+  }
+
+}
+
+
+prometheus.scrape "node_exporter" {
+  targets    = discovery.relabel.node_exporter.output
+  forward_to = [otelcol.receiver.prometheus.default.receiver] 
+  scrape_interval = "15s"
+
+}
+
+
+//=================== cAdvisor
+
+prometheus.exporter.cadvisor "docker" {
+  docker_host = "unix:///var/run/docker.sock"
+  docker_only = true
+  store_container_labels = true
+}
+
+prometheus.scrape "cadvisor" {
+  targets    = prometheus.exporter.cadvisor.docker.targets
+  forward_to = [prometheus.relabel.cadvisor_metrics.receiver]
+  scrape_interval = "15s"
+}
+
+prometheus.relabel "cadvisor_metrics" {
+  forward_to = [otelcol.receiver.prometheus.default.receiver]
+
+  rule {
+      source_labels = ["__meta_docker_container_name"]
+      regex         = "/(.*)"
+      target_label  = "container_name"
+    }
+
+  // ДОБАВЛЯЕМ метку "container_image"
+  rule {
+    source_labels = ["__meta_docker_container_image"]
+    target_label  = "container_image"
+  }
+
+
+  rule {
+    source_labels = ["container_label_com_docker_compose_service"]
+    target_label = "container_service"
+  }
+
+  rule {
+    source_labels = ["container_label_com_docker_compose_project"]
+    target_label = "container_project"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "docker_cadvisor"
+  }
+
+  rule {
+    target_label = "host"
+    replacement  = sys.env("HOSTNAME_FROM_HOST")
+  }
+
+
+}
+
+// ==================== КОНВЕРТАЦИЯ И ОТПРАВКА ====================
+
+otelcol.receiver.prometheus "default" {
+  output { 
+    metrics = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.receiver.loki "default" {
+  output { logs = [otelcol.processor.batch.default.input] }
+}
+
+otelcol.processor.batch "default" {
+  timeout = "5s"
+  send_batch_size = 1024
+  output {
+    metrics = [otelcol.exporter.otlp.gateway.input]
+    logs    = [otelcol.exporter.otlp.gateway.input]
+  }
+}
+
+otelcol.exporter.otlp "gateway" {
+  client {
+    endpoint = "10.0.77.33:4317"
+    tls { insecure = true }
+  }
+}

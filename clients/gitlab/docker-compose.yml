@@ -53,22 +53,22 @@ services:
       - '--path.sysfs=/host/sys'
       - '--path.rootfs=/rootfs'
     ports:
-      - "9100:9100"   # если нужно скрапить напрямую, но Alloy уже скрапит внутри сети
+      - "9101:9101"   # если нужно скрапить напрямую, но Alloy уже скрапит внутри сети
     networks:
       - alloy-client-net
 
-  homepage:
-    image: ghcr.io/gethomepage/homepage:latest
-    container_name: homepage
-    ports:
-      - 3000:3000
-    volumes:
-      - ./homepage:/app/config # Make sure your local config directory exists
-      - /var/run/docker.sock:/var/run/docker.sock:ro # (optional) For docker integrations, see alternative methods
-    environment:
-      - HOMEPAGE_ALLOWED_HOSTS=10.0.77.126:3000
-    networks:
-      - alloy-client-net
+#  homepage:
+#    image: ghcr.io/gethomepage/homepage:latest
+#    container_name: homepage
+#    ports:
+#     - 3000:3000
+#    volumes:
+#      - ./homepage:/app/config # Make sure your local config directory exists
+#      - /var/run/docker.sock:/var/run/docker.sock:ro # (optional) For docker integrations, see alternative methods
+#    environment:
+#      - HOMEPAGE_ALLOWED_HOSTS=10.0.77.126:3000
+#    networks:
+#      - alloy-client-net
 
 
 #  cadvisor:

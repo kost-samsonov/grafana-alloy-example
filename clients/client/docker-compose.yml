@@ -1,0 +1,91 @@
+version: '3.8'
+
+networks:
+  alloy-client-net:
+    driver: bridge
+
+
+services:
+  alloy:
+    image: grafana/alloy:latest
+    container_name: alloy-client
+    restart: unless-stopped
+    environment:
+      - HOSTNAME_FROM_HOST=${HOST_HOSTNAME}
+      - ALLOY_DEPLOY_MODE=docker
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy
+
+      - /:/rootfs:ro
+      - /sys:/sys:ro
+      - /dev/disk/:/dev/disk:ro
+      - /proc:/rootproc:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /var/run:/var/run:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - '12345:12345'
+      - "4317:4317"   # для приёма трейсов по gRPC от локальных приложений
+      - "4318:4318"   # для приёма трейсов по HTTP
+    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
+    privileged: true
+    networks:
+      - alloy-client-net
+    # Если нужно ограничить потребление памяти, добавьте:
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 512M
+
+  node_exporter:
+    image: prom/node-exporter:latest
+    container_name: node_exporter
+    restart: unless-stopped
+    environment:
+      - HOSTNAME_FROM_HOST=${HOST_HOSTNAME}
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+    ports:
+      - "9100:9100"   # если нужно скрапить напрямую, но Alloy уже скрапит внутри сети
+    networks:
+      - alloy-client-net
+
+#  homepage:
+#    image: ghcr.io/gethomepage/homepage:latest
+#    container_name: homepage
+#    ports:
+#      - 3000:3000
+#    volumes:
+#      - ./homepage:/app/config # Make sure your local config directory exists
+#      - /var/run/docker.sock:/var/run/docker.sock:ro # (optional) For docker integrations, see alternative methods
+#    environment:
+#      - HOMEPAGE_ALLOWED_HOSTS=10.0.77.126:3000
+#    networks:
+#      - alloy-client-net
+
+
+#  cadvisor:
+#    image: gcr.io/cadvisor/cadvisor:latest
+#    container_name: cadvisor-client
+#    volumes:
+#      - /proc:/rootproc:ro
+#      - /var/run/docker.sock:/var/run/docker.sock
+#      - /sys:/sys:ro
+#      - /:/rootfs:ro
+#      - /dev/disk/:/dev/disk:ro
+#      - /var/lib/docker/:/var/lib/docker:ro
+#      - /var/log:/var/log:ro
+#    ports:
+#      - '8180:8080'
+#    privileged: true
+#    labels:
+#      - "com.google.cadvisor.export=true"
+#    networks:
+#      - alloy-client-net
