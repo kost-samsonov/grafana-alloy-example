@@ -488,6 +488,44 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Datacenter"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 101
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Node"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "View details in new tab",
+                    "url": "https://grafana.rcrtv.net/d/2UgUicaGk/node-exporter-full?var-host=${host}&var-hostname=${__value.text}"
+                  }
+                ]
+              },
+              {
+                "id": "custom.width",
+                "value": 129
+              },
+              {
+                "id": "custom.filterable",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Load"
             },
             "properties": [
@@ -578,7 +616,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Host"
+              "options": "host"
             },
             "properties": [
               {
@@ -589,6 +627,7 @@
                 "id": "links",
                 "value": [
                   {
+                    "targetBlank": true,
                     "title": "Details",
                     "url": "http://sysmon01.xmri.local:4000/d/rYdddlPWk/node-exporter-full?orgId=1&var-host=${__data.fields.host}"
                   }
@@ -629,6 +668,54 @@
               {
                 "id": "custom.width",
                 "value": 141
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "container_service 1"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 124
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "container_project 2"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 99
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "container_name 1"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 147
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "nodename"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 127
               }
             ]
           }
@@ -704,7 +791,6 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "code",
           "exemplar": true,
           "expr": "max(rate(node_disk_read_bytes_total{host=~\"$host\"}[$__rate_interval])) by (host)",
           "format": "table",
@@ -787,8 +873,7 @@
           "datasource": {
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "code",
-          "expr": "avg(node_sockstat_sockets_used{host=~\"$host\"}) by (host)",
+          "expr": "node_sockstat_sockets_used{host=~\"$host\"}",
           "format": "table",
           "instant": true,
           "interval": "",
@@ -798,30 +883,6 @@
       ],
       "title": "Node resources usage ",
       "transformations": [
-        {
-          "id": "filterFieldsByName",
-          "options": {
-            "include": {
-              "names": [
-                "Value #H",
-                "Value #I",
-                "Value #J",
-                "Value #K",
-                "Value #L",
-                "Value #M",
-                "host",
-                "Value #node_time",
-                "Value #N",
-                "job",
-                "Value #A",
-                "Value #C",
-                "Value #D",
-                "Value #F",
-                "Value #G"
-              ]
-            }
-          }
-        },
         {
           "id": "seriesToColumns",
           "options": {
@@ -851,7 +912,6 @@
               "Value #B": true,
               "Value #C": false,
               "Value #E": true,
-              "__name__": true,
               "__name__ 1": true,
               "__name__ 2": true,
               "__name__ 3": true,
@@ -984,9 +1044,7 @@
               "Value #M": "Load",
               "Value #N": "Net sock",
               "datacenter 1": "DC",
-              "host": "Host",
-              "hostname 1": "Node",
-              "sysname": ""
+              "hostname 1": "Node"
             }
           }
         }
@@ -1073,6 +1131,6 @@
   "timezone": "browser",
   "title": "Node Exporter Resources Overview",
   "uid": "gbGKmy-GzA",
-  "version": 3,
+  "version": 2,
   "weekStart": ""
 }
