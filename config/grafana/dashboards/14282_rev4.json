@@ -146,6 +146,16 @@
               {
                 "id": "custom.width",
                 "value": 156
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Details",
+                    "url": "http://sysmon01.xmri.local:4000/d/rYdddlPWk/node-exporter-full?orgId=1&var-host=${__data.fields.host}"
+                  }
+                ]
               }
             ]
           },
@@ -254,7 +264,7 @@
         "sortBy": [
           {
             "desc": false,
-            "displayName": "Running"
+            "displayName": "Host"
           }
         ]
       },
